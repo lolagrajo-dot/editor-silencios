@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Recorta silencios y une tus clips</title>
+<style>
+  :root{
+    --bg:#0b0f1a; --bg2:#111827; --card:#131a2a; --card2:#182136;
+    --text:#e8edf7; --muted:#94a3b8; --line:#26324a;
+    --accent:#7c5cff; --accent2:#4cc9f0; --ok:#34d399; --warn:#fbbf24; --err:#f87171;
+    --radius:16px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    background:radial-gradient(1200px 600px at 20% -10%, #1b2440 0%, var(--bg) 55%) fixed;
+    color:var(--text); line-height:1.5; min-height:100vh;
+  }
+  .wrap{max-width:980px;margin:0 auto;padding:36px 20px 60px}
+  header.hero{text-align:center;margin-bottom:26px}
+  header.hero .logo{font-size:44px;line-height:1}
+  header.hero h1{font-size:clamp(24px,4vw,36px);margin:10px 0 8px;letter-spacing:-.5px}
+  header.hero p.sub{max-width:640px;margin:0 auto;color:var(--muted);font-size:15px}
+  .pills{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:14px}
+  .pill{font-size:12px;padding:4px 10px;border-radius:999px;border:1px solid var(--line);color:var(--muted);background:#0e1524}
+  .pill.ok{color:var(--ok);border-color:#1f4d3d}
+  .pill.warn{color:var(--warn);border-color:#4d3f1f}
+  .pill.err{color:var(--err);border-color:#4d1f1f}
+  .banner{border:1px solid #4d3f1f;background:#241d0e;color:#fde68a;padding:12px 16px;border-radius:12px;font-size:14px;margin-bottom:18px}
+  .card{background:linear-gradient(180deg,var(--card),var(--card2));border:1px solid var(--line);border-radius:var(--radius);padding:20px;margin-bottom:18px;box-shadow:0 8px 30px rgba(0,0,0,.25)}
+  .card h2{font-size:16px;margin:0 0 14px;letter-spacing:.2px}
+  .card-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}
+  .card-head h2{margin:0}
+  .dropzone{border:2px dashed #33415c;border-radius:14px;padding:34px 16px;text-align:center;cursor:pointer;transition:.15s border-color,.15s background;background:#0e1524}
+  .dropzone:hover,.dropzone.over{border-color:var(--accent);background:#141d31}
+  .dropzone .dz-icon{font-size:30px;margin-bottom:6px}
+  .dropzone p{margin:4px 0}
+  .dropzone .link{color:var(--accent2);text-decoration:underline}
+  .hint{color:var(--muted);font-size:13px;margin:8px 0 0}
+  .ghost{background:transparent;color:var(--muted);border:1px solid var(--line);border-radius:10px;padding:6px 12px;font-size:13px;cursor:pointer}
+  .ghost:hover{color:var(--text);border-color:#3a4a6b}
+  ol.clips{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+  li.clip{display:flex;align-items:center;gap:10px;background:#0e1524;border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+  li.clip .num{width:28px;height:28px;border-radius:8px;background:#1c2740;display:grid;place-items:center;font-size:13px;color:var(--accent2);flex:none;font-weight:600}
+  li.clip .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
+  li.clip .meta{color:var(--muted);font-size:12px;flex:none}
+  li.clip .iconbtn{background:#1c2740;border:0;color:var(--text);width:28px;height:28px;border-radius:8px;cursor:pointer;font-size:13px;flex:none}
+  li.clip .iconbtn:hover{background:#27365a}
+  li.clip .iconbtn.danger:hover{background:#4d1f1f;color:#fecaca}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px}
+  label{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--muted)}
+  input[type=number],select{
+    background:#0e1524;border:1px solid var(--line);color:var(--text);border-radius:10px;
+    padding:9px 10px;font-size:14px;font-family:inherit;width:100%
+  }
+  input[type=number]:focus,select:focus{outline:2px solid #3b4d78;outline-offset:1px}
+  .actions{display:flex;gap:12px;flex-wrap:wrap}
+  button.primary,a.primary{
+    display:inline-flex;align-items:center;justify-content:center;gap:8px;
+    background:linear-gradient(135deg,var(--accent),#5b3df5);color:#fff;border:0;border-radius:12px;
+    padding:12px 20px;font-size:15px;font-weight:600;cursor:pointer;text-decoration:none;
+    transition:.15s transform,.15s opacity;font-family:inherit
+  }
+  button.primary:hover,a.primary:hover{transform:translateY(-1px)}
+  button.primary:disabled{opacity:.35;cursor:not-allowed;transform:none}
+  button.secondary{
+    background:#1c2740;color:var(--text);border:1px solid #2f3f61;border-radius:12px;
+    padding:12px 20px;font-size:15px;font-weight:600;cursor:pointer;font-family:inherit
+  }
+  button.secondary:disabled{opacity:.35;cursor:not-allowed}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:500;font-size:12px;text-transform:uppercase;letter-spacing:.4px}
+  td.num,th.num{text-align:right;white-space:nowrap}
+  tfoot td{font-weight:600;border-bottom:0}
+  .summary{display:flex;gap:18px;flex-wrap:wrap;margin-top:14px;font-size:14px}
+  .summary b{color:var(--accent2)}
+  #resultVideo{width:100%;max-height:70vh;background:#000;border-radius:12px;display:block}
+  .result-actions{display:flex;align-items:center;gap:14px;margin-top:14px;flex-wrap:wrap}
+  .progress{height:6px;background:#0e1524;border-radius:999px;overflow:hidden;margin-bottom:10px;border:1px solid var(--line)}
+  .progress i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .2s}
+  pre#log{
+    margin:0;max-height:220px;overflow:auto;background:#080c15;border:1px solid #1b2437;border-radius:10px;
+    padding:10px 12px;font-size:11.5px;line-height:1.45;color:#93a4c0;white-space:pre-wrap;word-break:break-word
+  }
+  #log.collapsed{display:none}
+  .status{color:var(--muted);font-size:13px;margin-top:10px;min-height:18px}
+  .error{color:#fecaca;background:#3b1414;border:1px solid #7f1d1d;border-radius:10px;padding:10px 12px;font-size:13px;margin-top:12px;white-space:pre-wrap}
+  footer{color:#5b6b88;font-size:12px;text-align:center;margin-top:30px}
+  @media (max-width:640px){
+    .wrap{padding:22px 12px 40px}
+    .card{padding:16px}
+    li.clip .meta{display:none}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <div class="logo">🎬</div>
+    <h1>Recorta silencios y une tus clips</h1>
+    <p class="sub">Sube tus videos, elimina las pausas automáticamente y descarga un solo archivo. Todo se procesa dentro de tu navegador: tus videos no se suben a ningún servidor.</p>
+    <div class="pills">
+      <span id="motor" class="pill warn">Motor: sin cargar</span>
+      <span class="pill">100% local</span>
+      <span class="pill">MP4 · H.264</span>
+    </div>
+  </header>
+
+  <div id="fileWarning" class="banner" hidden></div>
+  <div id="errorBox" class="error" hidden></div>
+
+  <section class="card">
+    <div id="dropzone" class="dropzone" role="button" tabindex="0" aria-label="Añadir videos">
+      <div class="dz-icon">⬆️</div>
+      <p><strong>Arrastra tus videos aquí</strong> o <span class="link">haz clic para elegirlos</span></p>
+      <p class="hint">MP4, MOV, MKV, WEBM… · puedes añadir varios a la vez</p>
+      <input id="fileInput" type="file" accept="video/*,.mp4,.mov,.mkv,.webm,.avi,.m4v" multiple hidden>
+    </div>
+  </section>
+
+  <section class="card" id="cardList" hidden>
+    <div class="card-head">
+      <h2>Tus clips</h2>
+      <button id="btnClear" class="ghost" type="button">Vaciar lista</button>
+    </div>
+    <ol id="clipList" class="clips"></ol>
+    <p class="hint">Se unirán en este orden (por nombre de archivo). Usa ↑ ↓ para cambiarlo.</p>
+  </section>
+
+  <section class="card" id="cardConfig">
+    <h2>Ajustes</h2>
+    <div class="grid">
+      <label>Preset de recorte
+        <select id="preset">
+          <option value="suave">Suave — pausas de más de 1.2 s</option>
+          <option value="normal" selected>Normal — pausas de más de 0.6 s</option>
+          <option value="agresivo">Agresivo — pausas de más de 0.35 s</option>
+          <option value="personalizado">Personalizado</option>
+        </select>
+      </label>
+      <label>Umbral de silencio (dB)
+        <input id="noise" type="number" value="-30" min="-60" max="-5" step="1">
+      </label>
+      <label>Pausa mínima (segundos)
+        <input id="minSil" type="number" value="0.6" min="0.2" max="5" step="0.1">
+      </label>
+      <label>Margen al cortar (segundos)
+        <input id="pad" type="number" value="0.12" min="0" max="0.5" step="0.01">
+      </label>
+      <label>Calidad
+        <select id="quality">
+          <option value="rapida">Rápida — ultrafast · CRF 22</option>
+          <option value="estandar" selected>Estándar — veryfast · CRF 20</option>
+          <option value="alta">Alta — faster · CRF 18 (más lenta)</option>
+        </select>
+      </label>
+    </div>
+    <p class="hint" id="presetHint">Se eliminan las pausas que superan el tiempo indicado y bajan del umbral de volumen. El margen conserva un poco de aire a cada lado del corte.</p>
+  </section>
+
+  <section class="card actions">
+    <button id="btnAnalyze" class="primary" type="button" disabled>1 · Analizar silencios</button>
+    <button id="btnRender" class="secondary" type="button" disabled>2 · Generar video unido</button>
+    <span id="status" class="status" style="flex-basis:100%"></span>
+  </section>
+
+  <section class="card" id="cardReport" hidden>
+    <h2>Plan de corte</h2>
+    <div id="report"></div>
+    <div class="summary" id="summary"></div>
+  </section>
+
+  <section class="card" id="cardResult" hidden>
+    <h2>Resultado</h2>
+    <video id="resultVideo" controls playsinline></video>
+    <div class="result-actions">
+      <a id="download" class="primary" download>⬇ Descargar MP4</a>
+      <span id="resultInfo" class="hint"></span>
+    </div>
+  </section>
+
+  <section class="card" id="cardLog">
+    <div class="card-head">
+      <h2>Registro</h2>
+      <button id="btnToggleLog" class="ghost" type="button">Ocultar</button>
+    </div>
+    <div class="progress"><i id="bar"></i></div>
+    <pre id="log"></pre>
+  </section>
+
+  <footer>Procesado con ffmpeg.wasm en tu navegador · sin subir archivos</footer>
+</div>
+
+<script src="vendor/ffmpeg.js"></script>
+<script>
+(() => {
+  'use strict';
+
+  const $ = (id) => document.getElementById(id);
+
+  const el = {
+    motor: $('motor'), fileWarning: $('fileWarning'), errorBox: $('errorBox'),
+    dropzone: $('dropzone'), fileInput: $('fileInput'),
+    cardList: $('cardList'), clipList: $('clipList'), btnClear: $('btnClear'),
+    preset: $('preset'), noise: $('noise'), minSil: $('minSil'), pad: $('pad'), quality: $('quality'),
+    btnAnalyze: $('btnAnalyze'), btnRender: $('btnRender'), status: $('status'),
+    cardReport: $('cardReport'), report: $('report'), summary: $('summary'),
+    cardResult: $('cardResult'), resultVideo: $('resultVideo'), download: $('download'), resultInfo: $('resultInfo'),
+    bar: $('bar'), log: $('log'), btnToggleLog: $('btnToggleLog')
+  };
+
+  const PRESETS = {
+    suave: { noise: -35, minSil: 1.2 },
+    normal: { noise: -30, minSil: 0.6 },
+    agresivo: { noise: -25, minSil: 0.35 }
+  };
+  const QUALITY = {
+    rapida: { preset: 'ultrafast', crf: 22 },
+    estandar: { preset: 'veryfast', crf: 20 },
+    alta: { preset: 'faster', crf: 18 }
+  };
+  const OUT_W = 1080, OUT_H = 1920, OUT_FPS = 24;
+
+  const state = {
+    files: [], uid: 0, engine: null, engineReady: false,
+    busy: false, plan: null, logCapture: null,
+    logLines: [], logPending: false, resultUrl: null
+  };
+
+  /* ---------- utilidades ---------- */
+  const fmt = (s) => {
+    if (!isFinite(s) || s < 0) s = 0;
+    const m = Math.floor(s / 60), r = (s % 60).toFixed(1).replace('.', ',');
+    return m > 0 ? `${m} min ${r} s` : `${r} s`;
+  };
+  const escapeOk = () => {};
+  const parseDuration = (log) => {
+    const m = log.match(/Duration:\s*(\d+):(\d+):([\d.]+)/);
+    return m ? (+m[1]) * 3600 + (+m[2]) * 60 + parseFloat(m[3]) : 0;
+  };
+  const parseSilences = (log) => {
+    const starts = [...log.matchAll(/silence_start:\s*(-?[\d.]+)/g)].map(m => Math.max(0, parseFloat(m[1])));
+    const ends = [...log.matchAll(/silence_end:\s*(-?[\d.]+)/g)].map(m => parseFloat(m[1]));
+    const out = [];
+    for (let i = 0; i < starts.length; i++) {
+      if (i < ends.length) out.push({ s: starts[i], e: ends[i] });
+    }
+    return out;
+  };
+
+  function setMotor(kind, text) {
+    el.motor.className = 'pill ' + kind;
+    el.motor.textContent = text;
+  }
+  function setStatus(text) { el.status.textContent = text || ''; }
+  function setProgress(p) {
+    p = Math.max(0, Math.min(1, Number(p) || 0));
+    el.bar.style.width = (p * 100).toFixed(1) + '%';
+  }
+  function showError(err) {
+    const msg = (err && err.message) ? err.message : String(err);
+    el.errorBox.hidden = false;
+    el.errorBox.textContent = msg;
+    appendLog('\n[ERROR] ' + msg + '\n');
+  }
+  function clearError() { el.errorBox.hidden = true; el.errorBox.textContent = ''; }
+
+  function appendLog(line) {
+    state.logLines.push(line);
+    if (state.logLines.length > 500) state.logLines.splice(0, state.logLines.length - 500);
+    if (state.logPending) return;
+    state.logPending = true;
+    requestAnimationFrame(() => {
+      state.logPending = false;
+      el.log.textContent = state.logLines.join('\n');
+      el.log.scrollTop = el.log.scrollHeight;
+    });
+  }
+
+  /* ---------- motor ffmpeg.wasm ---------- */
+  async function ensureEngine() {
+    if (state.engineReady) return state.engine;
+    if (!window.FFmpegWASM || !window.FFmpegWASM.FFmpeg) {
+      throw new Error('No se pudo cargar el motor (vendor/ffmpeg.js). Comprueba que la carpeta "vendor" esté junto a este archivo.');
+    }
+    setMotor('warn', 'Motor: cargando…');
+    setStatus('Cargando motor de video (~32 MB, solo la primera vez)…');
+    const ffmpeg = new window.FFmpegWASM.FFmpeg();
+    ffmpeg.on('log', ({ message }) => {
+      if (state.logCapture) state.logCapture.push(message);
+      appendLog(message);
+    });
+    ffmpeg.on('progress', ({ progress }) => {
+      if (state.busy) setProgress(progress);
+    });
+    const base = new URL('vendor/', location.href).href;
+    try {
+      await ffmpeg.load({
+        coreURL: base + 'ffmpeg-core.js',
+        wasmURL: base + 'ffmpeg-core.wasm'
+      });
+    } catch (e) {
+      setMotor('err', 'Motor: error');
+      throw new Error('No se pudo iniciar el motor de video. Abre esta página con el archivo "abrir-editor.bat" (servidor local). Detalle: ' + (e && e.message ? e.message : e));
+    }
+    state.engine = ffmpeg;
+    state.engineReady = true;
+    setMotor('ok', 'Motor listo');
+    setStatus('');
+    return ffmpeg;
+  }
+
+  async function cleanupMemfs(ffmpeg) {
+    try {
+      const entries = await ffmpeg.listDir('/');
+      for (const e of entries) {
+        if (e.isDir) continue;
+        if (/^(in\d+\.mp4|salida\.mp4)$/.test(e.name)) {
+          try { await ffmpeg.deleteFile(e.name); } catch (_) {}
+        }
+      }
+    } catch (_) {}
+  }
+
+  /* ---------- archivos ---------- */
+  function probeVideo(file) {
+    return new Promise((resolve) => {
+      const url = URL.createObjectURL(file);
+      const v = document.createElement('video');
+      v.preload = 'metadata';
+      let done = false;
+      const finish = (data) => {
+        if (done) return;
+        done = true;
+        URL.revokeObjectURL(url);
+        resolve(data);
+      };
+      v.onloadedmetadata = () => finish({ duration: v.duration, w: v.videoWidth, h: v.videoHeight });
+      v.onerror = () => finish({ duration: 0, w: 0, h: 0 });
+      setTimeout(() => finish({ duration: 0, w: 0, h: 0 }), 8000);
+      v.src = url;
+    });
+  }
+
+  async function addFiles(list) {
+    const incoming = [...list].filter(f => /^video\//.test(f.type) || /\.(mp4|mov|mkv|webm|avi|m4v)$/i.test(f.name));
+    if (!incoming.length) { showError(new Error('Esos archivos no parecen ser videos compatibles.')); return; }
+    clearError();
+    setStatus('Leyendo información de los videos…');
+    const probed = await Promise.all(incoming.map(async (f) => {
+      const meta = await probeVideo(f);
+      return { id: ++state.uid, file: f, name: f.name, duration: meta.duration, w: meta.w, h: meta.h };
+    }));
+    state.files.push(...probed);
+    state.files.sort((a, b) => a.name.localeCompare(b.name, 'es', { numeric: true }));
+    invalidatePlan();
+    renderClips();
+    setStatus(`${state.files.length} clip(s) listos. Pulsa "Analizar silencios".`);
+  }
+
+  function invalidatePlan() {
+    state.plan = null;
+    el.cardReport.hidden = true;
+    el.cardResult.hidden = true;
+    el.btnRender.disabled = true;
+    el.btnAnalyze.disabled = state.files.length === 0;
+  }
+
+  function renderClips() {
+    el.cardList.hidden = state.files.length === 0;
+    el.clipList.textContent = '';
+    state.files.forEach((f, i) => {
+      const li = document.createElement('li');
+      li.className = 'clip';
+
+      const num = document.createElement('span');
+      num.className = 'num';
+      num.textContent = String(i + 1);
+
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = f.name;
+      name.title = f.name;
+
+      const meta = document.createElement('span');
+      meta.className = 'meta';
+      meta.textContent = f.duration ? fmt(f.duration) : (f.w ? `${f.w}×${f.h}` : '');
+
+      const up = document.createElement('button');
+      up.className = 'iconbtn'; up.type = 'button'; up.textContent = '↑'; up.title = 'Subir'; up.disabled = i === 0;
+      up.onclick = () => { move(i, -1); };
+
+      const down = document.createElement('button');
+      down.className = 'iconbtn'; down.type = 'button'; down.textContent = '↓'; down.title = 'Bajar'; down.disabled = i === state.files.length - 1;
+      down.onclick = () => { move(i, 1); };
+
+      const del = document.createElement('button');
+      del.className = 'iconbtn danger'; del.type = 'button'; del.textContent = '✕'; del.title = 'Quitar';
+      del.onclick = () => { state.files.splice(i, 1); invalidatePlan(); renderClips(); };
+
+      li.append(num, name, meta, up, down, del);
+      el.clipList.appendChild(li);
+    });
+    el.btnAnalyze.disabled = state.files.length === 0 || state.busy;
+  }
+
+  function move(i, delta) {
+    const j = i + delta;
+    if (j < 0 || j >= state.files.length) return;
+    [state.files[i], state.files[j]] = [state.files[j], state.files[i]];
+    invalidatePlan();
+    renderClips();
+  }
+
+  /* ---------- segmentos ---------- */
+  function buildSegments(d, sils, minSil, pad, minKeep = 0.15) {
+    if (!d || d <= 0) return [];
+    const keeps = [];
+    let cur = 0;
+    for (const { s, e } of sils) {
+      if (e - s < minSil - 0.05) continue;
+      if (s - cur > 0.01) keeps.push([cur, Math.min(s, d)]);
+      cur = Math.max(cur, Math.min(e, d));
+    }
+    if (d - cur > 0.01) keeps.push([cur, d]);
+
+    const segs = [];
+    for (const [a0, b0] of keeps) {
+      let a = Math.max(0, a0 - pad);
+      let b = Math.min(d, b0 + pad);
+      if (segs.length && a < segs[segs.length - 1][1]) a = segs[segs.length - 1][1];
+      if (b - a >= minKeep) segs.push([a, b]);
+    }
+    if (!segs.length) return [[0, d]];
+
+    const head = sils.find(x => x.s <= 0.05 && (x.e - x.s) >= 0.30);
+    if (head) segs[0][0] = Math.max(segs[0][0], Math.min(head.e - pad, segs[0][1] - 0.05));
+    let tail = null;
+    for (const x of sils) if (x.e >= d - 0.08 && (x.e - x.s) >= 0.30) tail = x;
+    if (tail) {
+      const last = segs[segs.length - 1];
+      last[1] = Math.min(last[1], Math.max(tail.s + pad, last[0] + 0.05));
+    }
+    return segs.filter(([a, b]) => b - a >= minKeep);
+  }
+
+  function getConfig() {
+    const preset = el.preset.value;
+    const q = QUALITY[el.quality.value] || QUALITY.estandar;
+    return {
+      noise: parseFloat(el.noise.value) || -30,
+      minSil: Math.max(0.2, parseFloat(el.minSil.value) || 0.6),
+      pad: Math.max(0, Math.min(0.5, parseFloat(el.pad.value) || 0.12)),
+      preset: q.preset,
+      crf: q.crf
+    };
+  }
+
+  /* ---------- análisis ---------- */
+  async function onAnalyze() {
+    if (state.busy || !state.files.length) return;
+    clearError();
+    state.busy = true;
+    el.btnAnalyze.disabled = true;
+    el.btnRender.disabled = true;
+    setProgress(0);
+    let memfsFiles = [];
+    try {
+      const ffmpeg = await ensureEngine();
+      await cleanupMemfs(ffmpeg);
+      const cfg = getConfig();
+      const plan = [];
+      for (let i = 0; i < state.files.length; i++) {
+        const item = state.files[i];
+        setStatus(`Analizando ${i + 1}/${state.files.length}: ${item.name}`);
+        const fsName = `in${i}.mp4`;
+        await ffmpeg.writeFile(fsName, new Uint8Array(await item.file.arrayBuffer()));
+        memfsFiles.push(fsName);
+
+        state.logCapture = [];
+        let code = await ffmpeg.exec(['-hide_banner', '-nostats', '-i', fsName,
+          '-af', `silencedetect=noise=${cfg.noise}dB:d=0.25`, '-f', 'null', '-']);
+        let log = state.logCapture.join('\n');
+        state.logCapture = null;
+
+        let hasAudio = code === 0 && /Stream #\d+:\d+.*: Audio:/.test(log);
+        let sils = [];
+        if (hasAudio) {
+          sils = parseSilences(log);
+        } else {
+          appendLog(`[aviso] ${item.name}: no se detectó audio; se conserva completo.`);
+        }
+        const d = item.duration || parseDuration(log) || 0;
+        const segments = buildSegments(d, sils, cfg.minSil, cfg.pad);
+        plan.push({ item, fsName, hasAudio, d, sils, segments });
+        setProgress((i + 1) / state.files.length);
+      }
+      state.plan = plan;
+      renderReport(plan, cfg);
+      el.cardResult.hidden = true;
+      el.btnRender.disabled = false;
+      setStatus('Análisis listo. Revisa el plan y pulsa "Generar video unido".');
+    } catch (err) {
+      state.plan = null;
+      showError(err);
+      setStatus('');
+    } finally {
+      state.busy = false;
+      el.btnAnalyze.disabled = state.files.length === 0;
+      setProgress(0);
+    }
+  }
+
+  function renderReport(plan, cfg) {
+    const wrap = el.report;
+    wrap.textContent = '';
+    const table = document.createElement('table');
+    const thead = document.createElement('thead');
+    thead.innerHTML = '<tr><th>#</th><th>Clip</th><th class="num">Original</th><th class="num">Final</th><th class="num">Cortes</th><th class="num">Quitado</th></tr>';
+    table.appendChild(thead);
+    const tbody = document.createElement('tbody');
+
+    let totOri = 0, totFin = 0, totCuts = 0;
+    plan.forEach((p, i) => {
+      const fin = p.segments.reduce((acc, [a, b]) => acc + (b - a), 0);
+      const cuts = Math.max(0, p.segments.length - 1) + ((p.sils.some(x => x.s <= 0.05 && x.e - x.s >= 0.3)) ? 1 : 0) + ((p.sils.some(x => x.e >= p.d - 0.08 && x.e - x.s >= 0.3)) ? 1 : 0);
+      totOri += p.d; totFin += fin; totCuts += cuts;
+
+      const tr = document.createElement('tr');
+      const cells = [
+        String(i + 1),
+        p.item.name,
+        fmt(p.d),
+        fmt(fin),
+        String(cuts),
+        fmt(Math.max(0, p.d - fin))
+      ];
+      cells.forEach((text, idx) => {
+        const td = document.createElement('td');
+        if (idx === 1) { td.style.maxWidth = '260px'; td.style.overflow = 'hidden'; td.style.textOverflow = 'ellipsis'; td.style.whiteSpace = 'nowrap'; }
+        if (idx >= 2) td.className = 'num';
+        td.textContent = text;
+        if (idx === 1) td.title = text;
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+
+    const tfoot = document.createElement('tfoot');
+    const trf = document.createElement('tr');
+    const values = ['', 'Total', fmt(totOri), fmt(totFin), String(totCuts), fmt(totOri - totFin)];
+    values.forEach((text, idx) => {
+      const td = document.createElement('td');
+      if (idx >= 2) td.className = 'num';
+      td.textContent = text;
+      trf.appendChild(td);
+    });
+    tfoot.appendChild(trf);
+    table.appendChild(tfoot);
+    wrap.appendChild(table);
+
+    const pct = totOri > 0 ? Math.round((totOri - totFin) / totOri * 100) : 0;
+    el.summary.textContent = '';
+    const s1 = document.createElement('span');
+    s1.innerHTML = `Duración final: <b>${fmt(totFin)}</b>`;
+    const s2 = document.createElement('span');
+    s2.innerHTML = `Se quitan: <b>${fmt(totOri - totFin)}</b> (${pct}%)`;
+    const s3 = document.createElement('span');
+    s3.innerHTML = `Ajustes: <b>${cfg.noise} dB</b> · pausa mínima <b>${String(cfg.minSil).replace('.', ',')} s</b>`;
+    el.summary.append(s1, s2, s3);
+    el.cardReport.hidden = false;
+  }
+
+  /* ---------- render ---------- */
+  function buildGraph(plan, outName) {
+    const lines = [];
+    const args = [];
+    plan.forEach(p => args.push('-i', p.fsName));
+    const needsSilence = plan.some(p => !p.hasAudio);
+    let silenceIdx = null;
+    if (needsSilence) {
+      silenceIdx = plan.length;
+      args.push('-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo');
+    }
+    let n = 0;
+    const pairs = [];
+    plan.forEach((p, i) => {
+      p.segments.forEach(([a, b], j) => {
+        const dur = b - a;
+        const fade = Math.min(0.008, dur / 4);
+        lines.push(
+          `[${i}:v]trim=start=${a.toFixed(3)}:end=${b.toFixed(3)},setpts=PTS-STARTPTS,` +
+          `scale=${OUT_W}:${OUT_H}:force_original_aspect_ratio=decrease,` +
+          `pad=${OUT_W}:${OUT_H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${OUT_FPS},format=yuv420p[v${i}_${j}]`
+        );
+        const aSrc = p.hasAudio ? `${i}:a` : `${silenceIdx}:a`;
+        lines.push(
+          `[${aSrc}]atrim=start=${a.toFixed(3)}:end=${b.toFixed(3)},asetpts=PTS-STARTPTS,` +
+          `aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,` +
+          `afade=t=in:st=0:d=${fade.toFixed(3)},afade=t=out:st=${(dur - fade).toFixed(3)}:d=${fade.toFixed(3)}[a${i}_${j}]`
+        );
+        pairs.push(`[v${i}_${j}][a${i}_${j}]`);
+        n++;
+      });
+    });
+    lines.push(pairs.join('') + `concat=n=${n}:v=1:a=1[vout][aout]`);
+    return { args, graph: lines.join(';'), segments: n, outName };
+  }
+
+  async function onRender() {
+    if (state.busy) return;
+    if (!state.plan) { await onAnalyze(); if (!state.plan) return; }
+    clearError();
+    state.busy = true;
+    el.btnAnalyze.disabled = true;
+    el.btnRender.disabled = true;
+    setProgress(0);
+    try {
+      const ffmpeg = state.engine || await ensureEngine();
+      const cfg = getConfig();
+      const zip = buildGraph(state.plan, 'salida.mp4');
+      setStatus(`Generando video (${zip.segments} segmentos)… esto puede tardar unos minutos.`);
+      appendLog(`\n>>> Render: ${zip.segments} segmentos, preset ${cfg.preset}, CRF ${cfg.crf}\n`);
+      const cmd = [...zip.args, '-filter_complex', zip.graph, '-map', '[vout]', '-map', '[aout]',
+        '-c:v', 'libx264', '-preset', cfg.preset, '-crf', String(cfg.crf), '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-b:a', '192k', zip.outName];
+      const code = await ffmpeg.exec(cmd);
+      if (code !== 0) throw new Error('El renderizado falló. Revisa el registro para ver el detalle.');
+      const data = await ffmpeg.readFile(zip.outName);
+      const blob = new Blob([data], { type: 'video/mp4' });
+      if (state.resultUrl) URL.revokeObjectURL(state.resultUrl);
+      state.resultUrl = URL.createObjectURL(blob);
+      el.resultVideo.src = state.resultUrl;
+      const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+      el.download.href = state.resultUrl;
+      el.download.download = `unido_sin_silencios_${stamp}.mp4`;
+      el.resultInfo.textContent = `${(blob.size / 1048576).toFixed(1)} MB · ${fmt(state.plan.reduce((acc, p) => acc + p.segments.reduce((x, [a, b]) => x + (b - a), 0), 0))}`;
+      el.cardResult.hidden = false;
+      el.cardResult.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setStatus('¡Listo! Tu video está abajo para ver y descargar.');
+      appendLog('\n>>> Render completado.\n');
+      try { await ffmpeg.deleteFile(zip.outName); } catch (_) {}
+    } catch (err) {
+      showError(err);
+      setStatus('');
+    } finally {
+      state.busy = false;
+      el.btnAnalyze.disabled = state.files.length === 0;
+      el.btnRender.disabled = !state.plan;
+      setProgress(0);
+    }
+  }
+
+  /* ---------- eventos ---------- */
+  el.dropzone.addEventListener('click', () => el.fileInput.click());
+  el.dropzone.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.fileInput.click(); }
+  });
+  el.fileInput.addEventListener('change', () => {
+    if (el.fileInput.files.length) addFiles(el.fileInput.files);
+    el.fileInput.value = '';
+  });
+  ['dragenter', 'dragover'].forEach(ev => el.dropzone.addEventListener(ev, (e) => {
+    e.preventDefault(); el.dropzone.classList.add('over');
+  }));
+  ['dragleave', 'drop'].forEach(ev => el.dropzone.addEventListener(ev, (e) => {
+    e.preventDefault(); el.dropzone.classList.remove('over');
+  }));
+  el.dropzone.addEventListener('drop', (e) => {
+    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+  });
+  window.addEventListener('dragover', (e) => e.preventDefault());
+  window.addEventListener('drop', (e) => e.preventDefault());
+
+  el.btnClear.addEventListener('click', () => {
+    state.files = [];
+    invalidatePlan();
+    renderClips();
+    setStatus('');
+    el.cardReport.hidden = true;
+    el.cardResult.hidden = true;
+  });
+
+  el.preset.addEventListener('change', () => {
+    const p = PRESETS[el.preset.value];
+    if (p) {
+      el.noise.value = p.noise;
+      el.minSil.value = p.minSil;
+    }
+    invalidatePlan();
+  });
+  [el.noise, el.minSil].forEach(inp => inp.addEventListener('input', () => {
+    el.preset.value = 'personalizado';
+    invalidatePlan();
+  }));
+  el.pad.addEventListener('input', invalidatePlan);
+  el.quality.addEventListener('change', invalidatePlan);
+
+  el.btnAnalyze.addEventListener('click', onAnalyze);
+  el.btnRender.addEventListener('click', onRender);
+
+  el.btnToggleLog.addEventListener('click', () => {
+    const hidden = el.log.classList.toggle('collapsed');
+    el.btnToggleLog.textContent = hidden ? 'Mostrar' : 'Ocultar';
+  });
+
+  /* ---------- arranque ---------- */
+  if (location.protocol === 'file:') {
+    el.fileWarning.hidden = false;
+    el.fileWarning.textContent = '⚠️ Has abierto el archivo directamente. Para que el motor de video funcione, cierra esta pestaña y abre "abrir-editor.bat" (o sirve esta carpeta con un servidor local).';
+    setMotor('err', 'Motor: requiere servidor local');
+  }
+  setStatus('Añade tus videos para empezar.');
+})();
+</script>
+</body>
+</html>
