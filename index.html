@@ -53,11 +53,14 @@
   li.clip .iconbtn.danger:hover{background:#4d1f1f;color:#fecaca}
   .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px}
   label{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--muted)}
-  input[type=number],select{
+  input[type=number],input[type=text],input[type=password],select,textarea{
     background:#0e1524;border:1px solid var(--line);color:var(--text);border-radius:10px;
     padding:9px 10px;font-size:14px;font-family:inherit;width:100%
   }
-  input[type=number]:focus,select:focus{outline:2px solid #3b4d78;outline-offset:1px}
+  textarea{resize:vertical;min-height:76px;line-height:1.5}
+  input[type=number]:focus,input[type=text]:focus,input[type=password]:focus,select:focus,textarea:focus{outline:2px solid #3b4d78;outline-offset:1px}
+  a.ghost{text-decoration:none;display:inline-flex;align-items:center}
+  .meta-grid{display:flex;flex-direction:column;gap:12px}
   .actions{display:flex;gap:12px;flex-wrap:wrap}
   button.primary,a.primary{
     display:inline-flex;align-items:center;justify-content:center;gap:8px;
@@ -107,7 +110,7 @@
   <header class="hero">
     <div class="logo">🎬</div>
     <h1>Recorta silencios y une tus clips</h1>
-    <p class="sub">Sube tus videos, elimina las pausas automáticamente y descarga un solo archivo. Todo se procesa dentro de tu navegador: tus videos no se suben a ningún servidor.</p>
+    <p class="sub">Sube tus videos, elimina las pausas automáticamente y descarga un solo archivo. La edición se hace dentro de tu navegador: los videos no se suben a ningún servidor. La opción de título con IA envía solo unos fotogramas y un fragmento de audio a Google.</p>
     <div class="pills">
       <span id="motor" class="pill warn">Motor: sin cargar</span>
       <span class="pill">100% local</span>
@@ -194,6 +197,39 @@
     </div>
   </section>
 
+  <section class="card" id="cardMeta" hidden>
+    <div class="card-head">
+      <h2>✨ Título y hashtags</h2>
+      <button id="btnMetaConfig" class="ghost" type="button">Clave de IA</button>
+    </div>
+    <p class="hint" id="metaStatus"></p>
+    <div id="metaPanel" class="meta-grid" hidden>
+      <label>Título
+        <input id="metaTitle" type="text" maxlength="100" placeholder="Título del video" autocomplete="off">
+      </label>
+      <label>Hashtags
+        <textarea id="metaTags" rows="3" placeholder="#parati #reels #shorts" spellcheck="false"></textarea>
+      </label>
+      <div class="actions">
+        <button id="btnCopyTitle" class="secondary" type="button">Copiar título</button>
+        <button id="btnCopyTags" class="secondary" type="button">Copiar hashtags</button>
+        <button id="btnCopyAll" class="ghost" type="button">Copiar todo</button>
+        <button id="btnMetaRegen" class="ghost" type="button">🔄 Regenerar</button>
+      </div>
+    </div>
+    <div id="metaConfig" hidden>
+      <label>Clave API de Gemini
+        <input id="metaKey" type="password" placeholder="Pega aquí tu clave (AIza…)" autocomplete="off" spellcheck="false">
+      </label>
+      <div class="actions" style="margin-top:12px">
+        <button id="btnMetaSave" class="primary" type="button">Guardar clave</button>
+        <a class="ghost" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Conseguir una clave gratis</a>
+        <button id="btnMetaForget" class="ghost" type="button">Olvidar clave</button>
+      </div>
+      <p class="hint">La clave se guarda solo en este navegador y no está dentro de la web. Para generar el título se envían 6 fotogramas y hasta 60 s de audio a Google Gemini; el video completo no se sube.</p>
+    </div>
+  </section>
+
   <section class="card" id="cardLog">
     <div class="card-head">
       <h2>Registro</h2>
@@ -204,7 +240,7 @@
     <pre id="log"></pre>
   </section>
 
-  <footer>Procesado con ffmpeg.wasm en tu navegador · sin subir archivos</footer>
+  <footer>Procesado con ffmpeg.wasm en tu navegador · el título con IA es opcional y usa Google Gemini</footer>
 </div>
 
 <script src="vendor/ffmpeg.js"></script>
@@ -222,6 +258,10 @@
     btnAnalyze: $('btnAnalyze'), btnRender: $('btnRender'), status: $('status'),
     cardReport: $('cardReport'), report: $('report'), summary: $('summary'),
     cardResult: $('cardResult'), resultVideo: $('resultVideo'), download: $('download'), resultInfo: $('resultInfo'),
+    cardMeta: $('cardMeta'), metaStatus: $('metaStatus'), metaPanel: $('metaPanel'), metaTitle: $('metaTitle'),
+    metaTags: $('metaTags'), metaConfig: $('metaConfig'), metaKey: $('metaKey'), btnMetaConfig: $('btnMetaConfig'),
+    btnMetaSave: $('btnMetaSave'), btnMetaForget: $('btnMetaForget'), btnMetaRegen: $('btnMetaRegen'),
+    btnCopyTitle: $('btnCopyTitle'), btnCopyTags: $('btnCopyTags'), btnCopyAll: $('btnCopyAll'),
     bar: $('bar'), pct: $('pct'), phase: $('phase'), log: $('log'), btnToggleLog: $('btnToggleLog')
   };
 
@@ -236,11 +276,14 @@
     alta: { preset: 'faster', crf: 18 }
   };
   const OUT_W = 1080, OUT_H = 1920, OUT_FPS = 24;
+  const AI_KEY_STORAGE = 'editorSilencios_gemini_key';
+  const BASIC_TAGS = ['#parati','#fyp','#reels','#shorts','#viral','#video','#creadores','#contenido','#edicion','#sinsilencios'];
 
   const state = {
     files: [], uid: 0, engine: null, engineReady: false,
     busy: false, plan: null, logCapture: null,
     logLines: [], logPending: false, resultUrl: null,
+    lastRender: null, aiMedia: null, metaBusy: false,
     progressBase: 0, progressSpan: 1, progressTotalUs: 0, phasePrefix: '', progressIgnoreUntil: 0, progressSeen: false, progressLastUs: 0
   };
 
@@ -294,6 +337,256 @@
       el.log.textContent = state.logLines.join('\n');
       el.log.scrollTop = el.log.scrollHeight;
     });
+  }
+
+  /* ---------- título y hashtags con IA ---------- */
+  function getAiKey() {
+    try { return localStorage.getItem(AI_KEY_STORAGE) || ''; } catch (_) { return ''; }
+  }
+  function setAiKey(key) {
+    try {
+      if (key) localStorage.setItem(AI_KEY_STORAGE, key);
+      else localStorage.removeItem(AI_KEY_STORAGE);
+    } catch (_) {}
+  }
+  function setMetaStatus(text, kind) {
+    el.metaStatus.textContent = text || '';
+    el.metaStatus.style.color = kind === 'err' ? 'var(--err)' : kind === 'ok' ? 'var(--ok)' : '';
+  }
+  function basicTitle() {
+    const names = state.files.map(f => f.name.replace(/\.[^.]+$/, '').replace(/[_\-\.]+/g, ' ').replace(/\s+/g, ' ').trim())
+      .filter(n => n && !/^\d+$/.test(n));
+    if (names.length === 1) return names[0].slice(0, 70);
+    if (names.length > 1) return (names[0] + ' y más').slice(0, 70);
+    return 'Mi video sin silencios';
+  }
+  function showBasicMeta() {
+    el.cardMeta.hidden = false;
+    el.metaPanel.hidden = false;
+    el.metaTitle.value = basicTitle();
+    el.metaTags.value = BASIC_TAGS.join(' ');
+    const hasKey = !!getAiKey();
+    el.metaConfig.hidden = hasKey;
+    el.btnMetaRegen.disabled = false;
+    setMetaStatus(hasKey
+      ? 'Analizando el video con IA…'
+      : 'Sugerencia básica sin IA. Añade tu clave de Gemini para que detecte de qué va el video.', '');
+  }
+  function toBase64(u8) {
+    let s = '';
+    const CH = 0x8000;
+    for (let i = 0; i < u8.length; i += CH) s += String.fromCharCode.apply(null, u8.subarray(i, i + CH));
+    return btoa(s);
+  }
+  function aiSignal(ms) {
+    try { return AbortSignal.timeout(ms); } catch (_) { return undefined; }
+  }
+  async function prepareAiMedia() {
+    if (state.aiMedia) return state.aiMedia;
+    if (!state.lastRender || !state.engineReady) throw new Error('Vuelve a generar el video para poder analizarlo con IA.');
+    const ffmpeg = state.engine;
+    const { name, duration } = state.lastRender;
+    const frames = [];
+    const count = duration < 3 ? 3 : 6;
+    for (let i = 0; i < count; i++) {
+      const t = Math.max(0, duration * (i + 0.5) / count);
+      const out = `ia_frame_${i}.jpg`;
+      try {
+        const code = await ffmpeg.exec(['-y', '-hide_banner', '-stats', '-stats_period', '0.5', '-ss', t.toFixed(3), '-i', name,
+          '-frames:v', '1', '-vf', 'scale=512:512:force_original_aspect_ratio=decrease', '-q:v', '5', out]);
+        if (code === 0) {
+          const data = await ffmpeg.readFile(out);
+          if (data && data.length) frames.push(toBase64(data));
+        }
+      } catch (_) {}
+      try { await ffmpeg.deleteFile(out); } catch (_) {}
+    }
+    let audio = null;
+    try {
+      const code = await ffmpeg.exec(['-y', '-hide_banner', '-stats', '-stats_period', '0.5', '-i', name,
+        '-t', String(Math.min(60, Math.ceil(duration || 0))), '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', 'ia_audio.wav']);
+      if (code === 0) {
+        const data = await ffmpeg.readFile('ia_audio.wav');
+        if (data && data.length > 1000) audio = toBase64(data);
+      }
+    } catch (_) {}
+    try { await ffmpeg.deleteFile('ia_audio.wav'); } catch (_) {}
+    if (!frames.length) throw new Error('No se pudieron extraer fotogramas del video.');
+    state.aiMedia = { frames, audio };
+    return state.aiMedia;
+  }
+  async function geminiCandidates(key) {
+    const fallback = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+    try {
+      const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', {
+        headers: { 'x-goog-api-key': key }, signal: aiSignal(15000)
+      });
+      if (!r.ok) return fallback;
+      const j = await r.json();
+      const list = (j.models || [])
+        .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
+        .map(m => String(m.name || '').replace(/^models\//, ''))
+        .filter(n => /flash/i.test(n) && !/(image|tts|embedding|aqa|learnlm|robotics)/i.test(n));
+      const score = (n) => {
+        const v = parseFloat((n.match(/(\d+(?:\.\d+)?)/) || [0, 0])[1]) || 0;
+        return v + (/lite/i.test(n) ? -0.1 : 0) + (/(preview|exp)/i.test(n) ? -0.05 : 0);
+      };
+      list.sort((a, b) => score(b) - score(a));
+      return [...new Set([...list.slice(0, 5), ...fallback])];
+    } catch (_) { return fallback; }
+  }
+  function geminiMessage(status, raw) {
+    let detail = '';
+    try { detail = (JSON.parse(raw).error || {}).message || ''; } catch (_) {}
+    if (status === 401 || status === 403) return 'La clave de Gemini no es válida o no tiene permiso.';
+    if (status === 429) return 'Se agotó la cuota gratuita de Gemini por ahora. Espera un poco o usa otra clave.';
+    if (status === 404) return 'El modelo de IA no está disponible con esta clave.';
+    if (status === 400) return 'Gemini rechazó la petición' + (detail ? ': ' + detail : '.');
+    return 'Error de IA (' + status + ')' + (detail ? ': ' + detail : '.');
+  }
+  function parseAiMeta(text) {
+    const s = String(text).replace(/```json/gi, '').replace(/```/g, '');
+    const a = s.indexOf('{'), b = s.lastIndexOf('}');
+    if (a < 0 || b <= a) throw new Error('La IA devolvió un formato inesperado.');
+    const obj = JSON.parse(s.slice(a, b + 1));
+    let title = String(obj.titulo || obj.title || '').replace(/^["'“”]+|["'“”]+$/g, '').replace(/\s+/g, ' ').trim();
+    if (!title) throw new Error('La IA no devolvió un título.');
+    if (title.length > 100) title = title.slice(0, 97).trim() + '…';
+    let tags = obj.hashtags || obj.hashtags_text || '';
+    if (!Array.isArray(tags)) tags = String(tags).split(/[\s,]+/);
+    const seen = new Set(), clean = [];
+    for (let t of tags) {
+      t = String(t).trim().replace(/^#+/, '').replace(/[^\p{L}\p{N}_]/gu, '');
+      if (!t) continue;
+      const tag = '#' + t;
+      if (seen.has(tag.toLowerCase())) continue;
+      seen.add(tag.toLowerCase());
+      clean.push(tag);
+      if (clean.length >= 14) break;
+    }
+    if (!clean.length) clean.push(...BASIC_TAGS);
+    return { title, tags: clean };
+  }
+  async function requestAiMeta(key, media) {
+    const models = await geminiCandidates(key);
+    const prompt = `Eres guionista de videos verticales para TikTok, Instagram Reels y YouTube Shorts.
+Analiza los fotogramas${media.audio ? ' y el audio' : ''} de este video ya editado y deduce de qué trata.
+Devuelve SOLO un JSON válido, sin markdown, con esta forma exacta:
+{"titulo":"...","hashtags":["#uno","#dos"]}
+Reglas:
+- Título en español, con gancho, de 35 a 65 caracteres. Sin emojis, sin comillas y sin la frase "este video".
+- Entre 10 y 14 hashtags en minúsculas: mezcla de hashtags específicos del tema y generales como #parati, #fyp, #reels, #shorts o #viral.
+- No inventes marcas, lugares ni personas que no se vean o mencionen.
+- Si no hay audio, guíate solo por las imágenes.
+Contexto: video vertical 9:16, ${state.files.length} clip(s) unidos, ${Math.round(state.lastRender.duration)} s de duración y silencios eliminados.`;
+    const imageParts = media.frames.map(f => ({ inline_data: { mime_type: 'image/jpeg', data: f } }));
+    const audioPart = media.audio ? { inline_data: { mime_type: 'audio/wav', data: media.audio } } : null;
+    let lastErr = null;
+    for (const model of models.slice(0, 5)) {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+      const send = async (withAudio) => {
+        const parts = [{ text: prompt }, ...imageParts];
+        if (withAudio && audioPart) parts.push(audioPart);
+        return fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+          body: JSON.stringify({
+            contents: [{ role: 'user', parts }],
+            generationConfig: { temperature: 0.85, maxOutputTokens: 600, responseMimeType: 'application/json' }
+          }),
+          signal: aiSignal(90000)
+        });
+      };
+      try {
+        let r = await send(true);
+        if (!r.ok) {
+          let raw = await r.text();
+          if (/API_KEY_INVALID|API key not valid/i.test(raw)) {
+            const e = new Error('La clave de Gemini no es válida. Revísala o crea otra en aistudio.google.com/apikey.');
+            e.status = 401;
+            throw e;
+          }
+          if (r.status === 400 && audioPart) {
+            r = await send(false);
+            raw = r.ok ? '' : await r.text();
+          }
+          if (!r.ok) {
+            const err = new Error(geminiMessage(r.status, raw));
+            err.status = r.status;
+            if (r.status === 400 || r.status === 404) { lastErr = err; continue; }
+            throw err;
+          }
+        }
+        const data = await r.json();
+        const text = (data.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('\n');
+        if (!text.trim()) throw new Error('La IA no devolvió texto. Prueba a regenerar.');
+        return parseAiMeta(text);
+      } catch (e) {
+        if (e.status && e.status !== 400 && e.status !== 404) throw e;
+        lastErr = e;
+      }
+    }
+    throw lastErr || new Error('No se pudo generar el título.');
+  }
+  async function runAiMeta() {
+    if (state.metaBusy) return;
+    const key = getAiKey();
+    if (!key) {
+      el.metaConfig.hidden = false;
+      el.metaKey.focus();
+      setMetaStatus('Añade tu clave de Gemini para usar la IA.', 'err');
+      return;
+    }
+    state.metaBusy = true;
+    state.busy = true;
+    el.btnMetaRegen.disabled = true;
+    el.btnAnalyze.disabled = true;
+    el.btnRender.disabled = true;
+    state.progressTotalUs = 0;
+    state.phasePrefix = '';
+    el.phase.textContent = 'IA: preparando video…';
+    setMetaStatus('Preparando fotogramas y audio…');
+    try {
+      const media = await prepareAiMedia();
+      if (!state.lastRender) throw new Error('El video cambió mientras se generaba el título. Vuelve a intentarlo.');
+      el.phase.textContent = 'IA: generando título…';
+      setMetaStatus('Analizando el contenido con IA… puede tardar unos segundos.');
+      const out = await requestAiMeta(key, media);
+      if (!state.lastRender) throw new Error('El video cambió mientras se generaba el título. Vuelve a intentarlo.');
+      el.metaTitle.value = out.title;
+      el.metaTags.value = out.tags.join(' ');
+      el.metaPanel.hidden = false;
+      el.cardMeta.hidden = false;
+      el.cardMeta.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      setMetaStatus('✨ Generado con IA. Revísalo, edítalo si quieres y cópialo.', 'ok');
+      el.phase.textContent = 'Título y hashtags listos';
+    } catch (e) {
+      const msg = e && e.name === 'TimeoutError' ? 'La IA tardó demasiado. Inténtalo de nuevo.' : (e && e.message ? e.message : String(e));
+      setMetaStatus(msg, 'err');
+      appendLog('\n[IA] ' + msg + '\n');
+      el.phase.textContent = 'Video listo';
+    } finally {
+      state.metaBusy = false;
+      state.busy = false;
+      el.btnMetaRegen.disabled = false;
+      el.btnAnalyze.disabled = state.files.length === 0;
+      el.btnRender.disabled = !state.plan;
+    }
+  }
+  async function copyText(text, btn) {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (_) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); } catch (_) {}
+      ta.remove();
+    }
+    const prev = btn.textContent;
+    btn.textContent = '¡Copiado!';
+    setTimeout(() => { btn.textContent = prev; }, 1400);
   }
 
   /* ---------- motor ffmpeg.wasm ---------- */
@@ -356,7 +649,7 @@
       const entries = await ffmpeg.listDir('/');
       for (const e of entries) {
         if (e.isDir) continue;
-        if (/^(in\d+\.mp4|salida\.mp4)$/.test(e.name)) {
+        if (/^(in\d+\.mp4|salida\.mp4|ia_.*)$/.test(e.name)) {
           try { await ffmpeg.deleteFile(e.name); } catch (_) {}
         }
       }
@@ -401,8 +694,11 @@
 
   function invalidatePlan() {
     state.plan = null;
+    state.lastRender = null;
+    state.aiMedia = null;
     el.cardReport.hidden = true;
     el.cardResult.hidden = true;
+    el.cardMeta.hidden = true;
     el.btnRender.disabled = true;
     el.btnAnalyze.disabled = state.files.length === 0;
   }
@@ -508,6 +804,9 @@
     el.btnAnalyze.disabled = true;
     el.btnRender.disabled = true;
     state.phasePrefix = '';
+    state.lastRender = null;
+    state.aiMedia = null;
+    el.cardMeta.hidden = true;
     setProgress(0, 'Preparando análisis…');
     let memfsFiles = [];
     try {
@@ -665,6 +964,7 @@
     state.busy = true;
     el.btnAnalyze.disabled = true;
     el.btnRender.disabled = true;
+    let autoMeta = false;
     try {
       const ffmpeg = state.engine || await ensureEngine();
       const cfg = getConfig();
@@ -680,7 +980,7 @@
       const zip = buildGraph(state.plan, 'salida.mp4', cfg.outW, cfg.outH);
       setStatus(`Generando video (${zip.segments} segmentos)… esto puede tardar unos minutos.`);
       appendLog(`\n>>> Render: ${zip.segments} segmentos, ${cfg.outW}x${cfg.outH}, preset ${cfg.preset}, CRF ${cfg.crf}\n`);
-      const cmd = ['-hide_banner', '-stats', '-stats_period', '0.25', ...zip.args,
+      const cmd = ['-y', '-hide_banner', '-stats', '-stats_period', '0.25', ...zip.args,
         '-filter_complex', zip.graph, '-map', '[vout]', '-map', '[aout]',
         '-c:v', 'libx264', '-preset', cfg.preset, '-crf', String(cfg.crf), '-pix_fmt', 'yuv420p',
         '-c:a', 'aac', '-b:a', '192k', zip.outName];
@@ -700,7 +1000,11 @@
       setProgress(1, 'Video listo');
       setStatus('¡Listo! Tu video está abajo para ver y descargar.');
       appendLog('\n>>> Render completado.\n');
-      try { await ffmpeg.deleteFile(zip.outName); } catch (_) {}
+      // Guarda el archivo en memoria para poder extraer fotogramas si se configura la IA después.
+      state.lastRender = { name: zip.outName, duration: totalOut, outW: cfg.outW, outH: cfg.outH, segments: zip.segments };
+      state.aiMedia = null;
+      autoMeta = !!getAiKey();
+      showBasicMeta();
     } catch (err) {
       showError(err);
       setStatus('');
@@ -711,6 +1015,7 @@
       el.btnAnalyze.disabled = state.files.length === 0;
       el.btnRender.disabled = !state.plan;
     }
+    if (autoMeta) runAiMeta();
   }
 
   /* ---------- eventos ---------- */
@@ -766,6 +1071,36 @@
     const hidden = el.log.classList.toggle('collapsed');
     el.btnToggleLog.textContent = hidden ? 'Mostrar' : 'Ocultar';
   });
+
+  el.btnMetaConfig.addEventListener('click', () => {
+    el.metaConfig.hidden = !el.metaConfig.hidden;
+    if (!el.metaConfig.hidden) {
+      el.metaKey.value = '';
+      el.metaKey.focus();
+    }
+  });
+  el.btnMetaSave.addEventListener('click', () => {
+    const k = el.metaKey.value.trim();
+    if (k.length < 20) {
+      setMetaStatus('Esa clave parece incompleta. Cópiala entera desde Google AI Studio.', 'err');
+      return;
+    }
+    setAiKey(k);
+    el.metaKey.value = '';
+    el.metaConfig.hidden = true;
+    setMetaStatus('Clave guardada. Generando título y hashtags…', 'ok');
+    runAiMeta();
+  });
+  el.btnMetaForget.addEventListener('click', () => {
+    setAiKey('');
+    el.metaConfig.hidden = false;
+    el.btnMetaRegen.disabled = false;
+    setMetaStatus('Clave borrada de este navegador.', '');
+  });
+  el.btnMetaRegen.addEventListener('click', () => runAiMeta());
+  el.btnCopyTitle.addEventListener('click', () => copyText(el.metaTitle.value.trim(), el.btnCopyTitle));
+  el.btnCopyTags.addEventListener('click', () => copyText(el.metaTags.value.trim(), el.btnCopyTags));
+  el.btnCopyAll.addEventListener('click', () => copyText((el.metaTitle.value.trim() + '\n\n' + el.metaTags.value.trim()).trim(), el.btnCopyAll));
 
   /* ---------- arranque ---------- */
   if (location.protocol === 'file:') {
