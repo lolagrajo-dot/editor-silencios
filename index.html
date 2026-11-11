@@ -241,7 +241,7 @@
     files: [], uid: 0, engine: null, engineReady: false,
     busy: false, plan: null, logCapture: null,
     logLines: [], logPending: false, resultUrl: null,
-    progressBase: 0, progressSpan: 1, progressTotalUs: 0, phasePrefix: '', progressIgnoreUntil: 0
+    progressBase: 0, progressSpan: 1, progressTotalUs: 0, phasePrefix: '', progressIgnoreUntil: 0, progressSeen: false, progressLastUs: 0
   };
 
   /* ---------- utilidades ---------- */
@@ -317,6 +317,15 @@
       if (performance.now() < state.progressIgnoreUntil) return;
       // Este motor informa del tiempo procesado en microsegundos (negativo en progress).
       const us = Math.abs(Number(time) || Number(progress) || 0);
+      if (state.phasePrefix) {
+        // Descarta el evento rezagado del proceso anterior (llega con el tiempo total) y nunca retrocede.
+        if (!state.progressSeen) {
+          if (us > state.progressTotalUs * 0.5) return;
+          state.progressSeen = true;
+        }
+        if (us < state.progressLastUs) return;
+        state.progressLastUs = us;
+      }
       const frac = Math.min(0.99, us / state.progressTotalUs);
       const overall = state.progressBase + frac * state.progressSpan;
       setProgress(overall);
@@ -665,6 +674,8 @@
       state.progressTotalUs = totalOut * 1e6;
       state.phasePrefix = 'Uniendo clips';
       state.progressIgnoreUntil = performance.now() + 150;
+      state.progressSeen = false;
+      state.progressLastUs = 0;
       setProgress(0, 'Uniendo clips…');
       const zip = buildGraph(state.plan, 'salida.mp4', cfg.outW, cfg.outH);
       setStatus(`Generando video (${zip.segments} segmentos)… esto puede tardar unos minutos.`);
