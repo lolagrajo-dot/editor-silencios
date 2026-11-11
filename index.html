@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Recorta silencios y une tus clips</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="mask-icon" href="favicon.svg" color="#7c5cff">
 <style>
   :root{
     --bg:#0b0f1a; --bg2:#111827; --card:#131a2a; --card2:#182136;
@@ -79,8 +81,11 @@
   .summary b{color:var(--accent2)}
   #resultVideo{width:100%;max-height:70vh;background:#000;border-radius:12px;display:block}
   .result-actions{display:flex;align-items:center;gap:14px;margin-top:14px;flex-wrap:wrap}
-  .progress{height:6px;background:#0e1524;border-radius:999px;overflow:hidden;margin-bottom:10px;border:1px solid var(--line)}
-  .progress i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .2s}
+  .progress-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:8px}
+  .progress-head #pct{font-size:24px;font-weight:700;letter-spacing:.5px;font-variant-numeric:tabular-nums;color:var(--text)}
+  .progress-head #phase{font-size:13px;color:var(--muted);text-align:right}
+  .progress{height:10px;background:#0e1524;border-radius:999px;overflow:hidden;margin-bottom:10px;border:1px solid var(--line)}
+  .progress i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .25s ease;box-shadow:0 0 12px rgba(124,92,255,.55)}
   pre#log{
     margin:0;max-height:220px;overflow:auto;background:#080c15;border:1px solid #1b2437;border-radius:10px;
     padding:10px 12px;font-size:11.5px;line-height:1.45;color:#93a4c0;white-space:pre-wrap;word-break:break-word
@@ -151,15 +156,21 @@
       <label>Margen al cortar (segundos)
         <input id="pad" type="number" value="0.12" min="0" max="0.5" step="0.01">
       </label>
+      <label>Resolución de salida
+        <select id="resolution">
+          <option value="720" selected>720×1280 — rápido</option>
+          <option value="1080">1080×1920 — máxima</option>
+        </select>
+      </label>
       <label>Calidad
         <select id="quality">
-          <option value="rapida">Rápida — ultrafast · CRF 22</option>
-          <option value="estandar" selected>Estándar — veryfast · CRF 20</option>
+          <option value="rapida" selected>Rápida — ultrafast · CRF 22</option>
+          <option value="estandar">Estándar — veryfast · CRF 20</option>
           <option value="alta">Alta — faster · CRF 18 (más lenta)</option>
         </select>
       </label>
     </div>
-    <p class="hint" id="presetHint">Se eliminan las pausas que superan el tiempo indicado y bajan del umbral de volumen. El margen conserva un poco de aire a cada lado del corte.</p>
+    <p class="hint" id="presetHint">Se eliminan las pausas que superan el tiempo indicado y bajan del umbral de volumen. El margen conserva un poco de aire a cada lado del corte. La opción 720p es unas 2 veces más rápida que 1080p.</p>
   </section>
 
   <section class="card actions">
@@ -188,6 +199,7 @@
       <h2>Registro</h2>
       <button id="btnToggleLog" class="ghost" type="button">Ocultar</button>
     </div>
+    <div class="progress-head"><span id="pct">0%</span><span id="phase">Listo</span></div>
     <div class="progress"><i id="bar"></i></div>
     <pre id="log"></pre>
   </section>
@@ -206,11 +218,11 @@
     motor: $('motor'), fileWarning: $('fileWarning'), errorBox: $('errorBox'),
     dropzone: $('dropzone'), fileInput: $('fileInput'),
     cardList: $('cardList'), clipList: $('clipList'), btnClear: $('btnClear'),
-    preset: $('preset'), noise: $('noise'), minSil: $('minSil'), pad: $('pad'), quality: $('quality'),
+    preset: $('preset'), noise: $('noise'), minSil: $('minSil'), pad: $('pad'), quality: $('quality'), resolution: $('resolution'),
     btnAnalyze: $('btnAnalyze'), btnRender: $('btnRender'), status: $('status'),
     cardReport: $('cardReport'), report: $('report'), summary: $('summary'),
     cardResult: $('cardResult'), resultVideo: $('resultVideo'), download: $('download'), resultInfo: $('resultInfo'),
-    bar: $('bar'), log: $('log'), btnToggleLog: $('btnToggleLog')
+    bar: $('bar'), pct: $('pct'), phase: $('phase'), log: $('log'), btnToggleLog: $('btnToggleLog')
   };
 
   const PRESETS = {
@@ -228,7 +240,8 @@
   const state = {
     files: [], uid: 0, engine: null, engineReady: false,
     busy: false, plan: null, logCapture: null,
-    logLines: [], logPending: false, resultUrl: null
+    logLines: [], logPending: false, resultUrl: null,
+    progressBase: 0, progressSpan: 1, progressTotalUs: 0, phasePrefix: ''
   };
 
   /* ---------- utilidades ---------- */
@@ -257,9 +270,11 @@
     el.motor.textContent = text;
   }
   function setStatus(text) { el.status.textContent = text || ''; }
-  function setProgress(p) {
+  function setProgress(p, label) {
     p = Math.max(0, Math.min(1, Number(p) || 0));
     el.bar.style.width = (p * 100).toFixed(1) + '%';
+    el.pct.textContent = Math.round(p * 100) + '%';
+    if (label !== undefined) el.phase.textContent = label;
   }
   function showError(err) {
     const msg = (err && err.message) ? err.message : String(err);
@@ -294,8 +309,16 @@
       if (state.logCapture) state.logCapture.push(message);
       appendLog(message);
     });
-    ffmpeg.on('progress', ({ progress }) => {
-      if (state.busy) setProgress(progress);
+    ffmpeg.on('progress', ({ progress, time }) => {
+      if (!state.busy || !state.progressTotalUs) return;
+      // Este motor informa del tiempo procesado en microsegundos (negativo en progress).
+      const us = Math.abs(Number(time) || Number(progress) || 0);
+      const frac = Math.min(1, us / state.progressTotalUs);
+      const overall = state.progressBase + frac * state.progressSpan;
+      setProgress(overall);
+      if (state.phasePrefix) {
+        el.phase.textContent = `${state.phasePrefix} · ${fmt(us / 1e6)} / ${fmt(state.progressTotalUs / 1e6)}`;
+      }
     });
     const base = new URL('vendor/', location.href).href;
     try {
@@ -450,13 +473,16 @@
 
   function getConfig() {
     const preset = el.preset.value;
-    const q = QUALITY[el.quality.value] || QUALITY.estandar;
+    const q = QUALITY[el.quality.value] || QUALITY.rapida;
+    const is1080 = el.resolution.value === '1080';
     return {
       noise: parseFloat(el.noise.value) || -30,
       minSil: Math.max(0.2, parseFloat(el.minSil.value) || 0.6),
       pad: Math.max(0, Math.min(0.5, parseFloat(el.pad.value) || 0.12)),
       preset: q.preset,
-      crf: q.crf
+      crf: q.crf,
+      outW: is1080 ? 1080 : 720,
+      outH: is1080 ? 1920 : 1280
     };
   }
 
@@ -467,7 +493,8 @@
     state.busy = true;
     el.btnAnalyze.disabled = true;
     el.btnRender.disabled = true;
-    setProgress(0);
+    state.phasePrefix = '';
+    setProgress(0, 'Preparando análisis…');
     let memfsFiles = [];
     try {
       const ffmpeg = await ensureEngine();
@@ -477,6 +504,10 @@
       for (let i = 0; i < state.files.length; i++) {
         const item = state.files[i];
         setStatus(`Analizando ${i + 1}/${state.files.length}: ${item.name}`);
+        state.progressBase = i / state.files.length;
+        state.progressSpan = 1 / state.files.length;
+        state.progressTotalUs = (item.duration || 0) * 1e6;
+        setProgress(state.progressBase, `Analizando ${i + 1}/${state.files.length} · ${item.name}`);
         const fsName = `in${i}.mp4`;
         await ffmpeg.writeFile(fsName, new Uint8Array(await item.file.arrayBuffer()));
         memfsFiles.push(fsName);
@@ -497,21 +528,22 @@
         const d = item.duration || parseDuration(log) || 0;
         const segments = buildSegments(d, sils, cfg.minSil, cfg.pad);
         plan.push({ item, fsName, hasAudio, d, sils, segments });
-        setProgress((i + 1) / state.files.length);
       }
       state.plan = plan;
       renderReport(plan, cfg);
       el.cardResult.hidden = true;
       el.btnRender.disabled = false;
+      setProgress(1, 'Análisis completado');
       setStatus('Análisis listo. Revisa el plan y pulsa "Generar video unido".');
     } catch (err) {
       state.plan = null;
       showError(err);
       setStatus('');
+      el.phase.textContent = 'Error';
     } finally {
       state.busy = false;
+      state.progressTotalUs = 0;
       el.btnAnalyze.disabled = state.files.length === 0;
-      setProgress(0);
     }
   }
 
@@ -577,7 +609,7 @@
   }
 
   /* ---------- render ---------- */
-  function buildGraph(plan, outName) {
+  function buildGraph(plan, outName, outW, outH) {
     const lines = [];
     const args = [];
     plan.forEach(p => args.push('-i', p.fsName));
@@ -595,8 +627,8 @@
         const fade = Math.min(0.008, dur / 4);
         lines.push(
           `[${i}:v]trim=start=${a.toFixed(3)}:end=${b.toFixed(3)},setpts=PTS-STARTPTS,` +
-          `scale=${OUT_W}:${OUT_H}:force_original_aspect_ratio=decrease,` +
-          `pad=${OUT_W}:${OUT_H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${OUT_FPS},format=yuv420p[v${i}_${j}]`
+          `scale=${outW}:${outH}:force_original_aspect_ratio=decrease,` +
+          `pad=${outW}:${outH}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${OUT_FPS},format=yuv420p[v${i}_${j}]`
         );
         const aSrc = p.hasAudio ? `${i}:a` : `${silenceIdx}:a`;
         lines.push(
@@ -619,13 +651,18 @@
     state.busy = true;
     el.btnAnalyze.disabled = true;
     el.btnRender.disabled = true;
-    setProgress(0);
     try {
       const ffmpeg = state.engine || await ensureEngine();
       const cfg = getConfig();
-      const zip = buildGraph(state.plan, 'salida.mp4');
+      const totalOut = state.plan.reduce((acc, p) => acc + p.segments.reduce((x, [a, b]) => x + (b - a), 0), 0);
+      state.progressBase = 0;
+      state.progressSpan = 1;
+      state.progressTotalUs = totalOut * 1e6;
+      state.phasePrefix = 'Uniendo clips';
+      setProgress(0, 'Uniendo clips…');
+      const zip = buildGraph(state.plan, 'salida.mp4', cfg.outW, cfg.outH);
       setStatus(`Generando video (${zip.segments} segmentos)… esto puede tardar unos minutos.`);
-      appendLog(`\n>>> Render: ${zip.segments} segmentos, preset ${cfg.preset}, CRF ${cfg.crf}\n`);
+      appendLog(`\n>>> Render: ${zip.segments} segmentos, ${cfg.outW}x${cfg.outH}, preset ${cfg.preset}, CRF ${cfg.crf}\n`);
       const cmd = [...zip.args, '-filter_complex', zip.graph, '-map', '[vout]', '-map', '[aout]',
         '-c:v', 'libx264', '-preset', cfg.preset, '-crf', String(cfg.crf), '-pix_fmt', 'yuv420p',
         '-c:a', 'aac', '-b:a', '192k', zip.outName];
@@ -639,20 +676,22 @@
       const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
       el.download.href = state.resultUrl;
       el.download.download = `unido_sin_silencios_${stamp}.mp4`;
-      el.resultInfo.textContent = `${(blob.size / 1048576).toFixed(1)} MB · ${fmt(state.plan.reduce((acc, p) => acc + p.segments.reduce((x, [a, b]) => x + (b - a), 0), 0))}`;
+      el.resultInfo.textContent = `${(blob.size / 1048576).toFixed(1)} MB · ${cfg.outW}×${cfg.outH} · ${fmt(totalOut)}`;
       el.cardResult.hidden = false;
       el.cardResult.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setProgress(1, 'Video listo');
       setStatus('¡Listo! Tu video está abajo para ver y descargar.');
       appendLog('\n>>> Render completado.\n');
       try { await ffmpeg.deleteFile(zip.outName); } catch (_) {}
     } catch (err) {
       showError(err);
       setStatus('');
+      el.phase.textContent = 'Error';
     } finally {
       state.busy = false;
+      state.progressTotalUs = 0;
       el.btnAnalyze.disabled = state.files.length === 0;
       el.btnRender.disabled = !state.plan;
-      setProgress(0);
     }
   }
 
@@ -700,6 +739,7 @@
   }));
   el.pad.addEventListener('input', invalidatePlan);
   el.quality.addEventListener('change', invalidatePlan);
+  el.resolution.addEventListener('change', invalidatePlan);
 
   el.btnAnalyze.addEventListener('click', onAnalyze);
   el.btnRender.addEventListener('click', onRender);

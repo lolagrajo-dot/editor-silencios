@@ -22,6 +22,7 @@ Todo el procesamiento ocurre **dentro del navegador** con [ffmpeg.wasm](https://
 | Umbral de silencio (dB) | Nivel de volumen por debajo del cual se considera silencio |
 | Pausa mínima (s) | Duración mínima de la pausa para recortarla |
 | Margen (s) | Aire que se conserva a cada lado del corte |
+| Resolución de salida | 720×1280 (rápido) o 1080×1920 (máxima) |
 | Calidad | Rápida / Estándar / Alta (más calidad = más tiempo de proceso) |
 
 ## Consejos
